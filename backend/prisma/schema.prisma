@@ -1,0 +1,336 @@
+// Glorious Labs - Production Database Schema
+// Database: PostgreSQL (Supabase)
+// ORM: Prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+}
+
+// ============================================
+// USER MANAGEMENT
+// ============================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String
+  phone         String?
+  college       String?
+  semester      Int?
+  branch        String?   // e.g., "Computer Science", "IT", "Electronics"
+  githubUrl     String?
+  linkedinUrl   String?
+  
+  // Authentication
+  passwordHash  String
+  emailVerified Boolean   @default(false)
+  verifiedAt    DateTime?
+  
+  // Role-based access
+  role          Role      @default(STUDENT)
+  
+  // Metadata
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lastLoginAt   DateTime?
+  
+  // Relations
+  enrollments   Enrollment[]
+  submissions   Submission[]
+  
+  @@index([email])
+  @@index([role])
+  @@index([createdAt])
+  @@map("users")
+}
+
+enum Role {
+  STUDENT
+  ADMIN
+  SUPER_ADMIN
+}
+
+// ============================================
+// INTERNSHIP CATALOG
+// ============================================
+
+model Internship {
+  id              String     @id @default(cuid())
+  
+  // Basic Info
+  title           String     // "Full-Stack Web Development with MERN"
+  slug            String     @unique // "mern-fullstack-internship"
+  domain          String     // "Web Development"
+  shortDesc       String     // One-liner for cards
+  description     String     @db.Text // Full description
+  
+  // Learning Details
+  learningOutcomes String[]  // Array of outcomes
+  techStack       String[]   // ["React", "Node.js", "MongoDB", "Express"]
+  prerequisites   String[]   // ["Basic JavaScript", "HTML/CSS"]
+  
+  // Project Details
+  projectOverview String     @db.Text
+  whatYouWillBuild String    @db.Text
+  
+  // Classification
+  difficulty      Difficulty
+  duration        Int        // in days (15, 21, 30)
+  estimatedHours  Int?       // Total effort hours (40, 60, 80)
+  
+  // Pricing
+  price           Int        // in rupees (99, 119, 149)
+  tier            PriceTier  @default(BASIC)
+  
+  // Files & Resources
+  thumbnailUrl    String?    // Cover image
+  projectGuideUrl String?    // PDF guide URL (Supabase Storage)
+  starterCodeUrl  String?    // GitHub repo or ZIP file
+  
+  // Visibility
+  isActive        Boolean    @default(true)
+  isFeatured      Boolean    @default(false)
+  maxEnrollments  Int?       // Optional enrollment cap
+  
+  // Stats (denormalized for performance)
+  totalEnrolled   Int        @default(0)
+  totalCompleted  Int        @default(0)
+  avgRating       Float?
+  
+  // Metadata
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  publishedAt     DateTime?
+  
+  // Relations
+  enrollments     Enrollment[]
+  
+  @@index([slug])
+  @@index([domain])
+  @@index([isActive])
+  @@index([isFeatured])
+  @@index([difficulty])
+  @@map("internships")
+}
+
+enum Difficulty {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
+enum PriceTier {
+  BASIC      // ₹99 - Project guide + Certificate
+  PRO        // ₹149 - + 1 doubt session + Code review
+  PREMIUM    // ₹299 - + Mentorship + LinkedIn recommendation
+}
+
+// ============================================
+// ENROLLMENTS & PAYMENTS
+// ============================================
+
+model Enrollment {
+  id              String           @id @default(cuid())
+  userId          String
+  internshipId    String
+  
+  // Payment Details
+  paymentId       String?          @unique // Razorpay order_id
+  razorpayPaymentId String?        @unique // Razorpay payment_id
+  paymentStatus   PaymentStatus    @default(PENDING)
+  amount          Int              // Amount paid in rupees
+  paidAt          DateTime?
+  
+  // Progress Tracking
+  status          EnrollmentStatus @default(DRAFT)
+  startedAt       DateTime?
+  submittedAt     DateTime?
+  completedAt     DateTime?
+  
+  // Deadlines
+  expectedEndDate DateTime?        // Based on duration
+  
+  // Outcomes
+  certificateUrl  String?          // Supabase Storage URL
+  offerLetterUrl  String?          // Supabase Storage URL
+  performanceGrade Grade?
+  
+  // Feedback
+  studentFeedback String?          @db.Text
+  studentRating   Int?             // 1-5 stars
+  
+  // Metadata
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  
+  // Relations
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  internship      Internship       @relation(fields: [internshipId], references: [id], onDelete: Cascade)
+  submissions     Submission[]
+  
+  @@unique([userId, internshipId]) // One enrollment per internship per user
+  @@index([userId])
+  @@index([internshipId])
+  @@index([paymentStatus])
+  @@index([status])
+  @@index([createdAt])
+  @@map("enrollments")
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+enum EnrollmentStatus {
+  DRAFT         // Interest shown, payment pending
+  ACTIVE        // Paid, working on project
+  SUBMITTED     // Submitted for review
+  UNDER_REVIEW  // Admin reviewing
+  COMPLETED     // Approved, certificate issued
+  REJECTED      // Did not meet standards
+  EXPIRED       // Deadline passed without submission
+}
+
+enum Grade {
+  GOOD         // Met requirements
+  EXCELLENT    // Exceeded expectations
+  OUTSTANDING  // Exceptional work
+}
+
+// ============================================
+// PROJECT SUBMISSIONS
+// ============================================
+
+model Submission {
+  id              String       @id @default(cuid())
+  enrollmentId    String
+  userId          String
+  
+  // Submission Details
+  githubRepoUrl   String       // Main submission
+  liveUrl         String?      // Deployed app URL (optional)
+  videoUrl        String?      // Demo video (optional for PRO/PREMIUM)
+  comments        String?      @db.Text // Student's notes
+  
+  // Review Details
+  reviewStatus    ReviewStatus @default(PENDING)
+  reviewedBy      String?      // Admin user ID who reviewed
+  reviewedAt      DateTime?
+  feedback        String?      @db.Text // Admin feedback
+  grade           Grade?
+  
+  // Code Quality Metrics (future: auto-calculated)
+  codeQualityScore Int?        // 0-100
+  hasReadme       Boolean?
+  hasTests        Boolean?
+  isDeployed      Boolean?
+  
+  // Version tracking (if student resubmits)
+  version         Int          @default(1)
+  isLatest        Boolean      @default(true)
+  
+  // Metadata
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  
+  // Relations
+  enrollment      Enrollment   @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([enrollmentId])
+  @@index([userId])
+  @@index([reviewStatus])
+  @@index([createdAt])
+  @@map("submissions")
+}
+
+enum ReviewStatus {
+  PENDING        // Awaiting admin review
+  IN_PROGRESS    // Admin is reviewing
+  APPROVED       // Meets standards, certificate issued
+  REJECTED       // Does not meet standards
+  NEEDS_REVISION // Requires changes before approval
+}
+
+// ============================================
+// COMMUNICATION LOGS
+// ============================================
+
+model EmailLog {
+  id          String      @id @default(cuid())
+  
+  // Recipient
+  to          String
+  cc          String?
+  bcc         String?
+  
+  // Email Details
+  subject     String
+  template    String      // "welcome", "payment_success", "certificate_issued"
+  provider    String      @default("resend")
+  
+  // Status
+  status      EmailStatus @default(SENT)
+  errorMsg    String?
+  
+  // Metadata (store dynamic data used in template)
+  metadata    Json?       // { userName: "...", internshipTitle: "..." }
+  
+  // Tracking
+  openedAt    DateTime?
+  clickedAt   DateTime?
+  
+  createdAt   DateTime    @default(now())
+  
+  @@index([to])
+  @@index([template])
+  @@index([status])
+  @@index([createdAt])
+  @@map("email_logs")
+}
+
+enum EmailStatus {
+  SENT
+  DELIVERED
+  OPENED
+  CLICKED
+  FAILED
+  BOUNCED
+}
+
+// ============================================
+// ADMIN ACTIVITY LOGS
+// ============================================
+
+model ActivityLog {
+  id          String   @id @default(cuid())
+  
+  // Actor
+  userId      String   // Admin who performed action
+  userName    String   // Cache for display
+  
+  // Action
+  action      String   // "approved_submission", "generated_certificate", "created_internship"
+  entity      String   // "submission", "enrollment", "internship"
+  entityId    String   // ID of affected entity
+  
+  // Details
+  metadata    Json?    // Additional context
+  ipAddress   String?
+  userAgent   String?
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([userId])
+  @@index([action])
+  @@index([entity])
+  @@index([createdAt])
+  @@map("activity_logs")
+}
