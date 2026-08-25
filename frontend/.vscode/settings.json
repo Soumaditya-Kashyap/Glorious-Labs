@@ -1,0 +1,8 @@
+{
+  "explorer.fileNesting.enabled": true,
+  "explorer.fileNesting.expand": false,
+  "explorer.fileNesting.patterns": {
+    "*.tsx": "$(capture).test.tsx, $(capture).stories.tsx",
+    "layout.tsx": "page.tsx, loading.tsx, error.tsx, not-found.tsx, template.tsx, default.tsx"
+  }
+}
